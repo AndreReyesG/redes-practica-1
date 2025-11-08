@@ -11,7 +11,7 @@
 #include <netinet/ether.h>
 #include <unistd.h>
 
- 
+
 #define BUF_SIZ              2000  /*Con 2000 bytes son suficientes para la trama, ya que va de 64 a 1518*/
 #define TRAMA_DESTINATION    0
 #define TRAMA_SOURCE         6   
@@ -26,50 +26,46 @@
 /*el filtrado. Ver codigo en recv_eth.c                                     */
 #define ETHER_TYPE           0x0100 /*Nuestro "protocolo"*/
 
- /*Tipo de dato sin signo*/
+/*Tipo de dato sin signo*/
 typedef unsigned char byte;
 
 
- void vConvierteMAC (char *psMac, char *psOrg)
- { /*En lugar de caracteres, se requiere el numero*/
-   int i, j, iAux, iAcu;
-   for (i=0, j=0, iAcu=0; i<12; i++)
-   {
-     if ((psOrg[i]>47)&&(psOrg[i]<58))  iAux = psOrg[i] - 48;  /*0:9*/
-     if ((psOrg[i]>64)&&(psOrg[i]<71))  iAux = psOrg[i] - 55;  /*A:F*/
-     if ((psOrg[i]>96)&&(psOrg[i]<103)) iAux = psOrg[i] - 87;  /*a:f*/ 
-     if ((i%2)==0) iAcu = iAux * 16;
-     else 
-     { /*Obtiene el byte*/
-       psMac[j] = iAcu + iAux;  j++;
-     }
-   }
- }
- 
- void vImprimeTrama (char *psTrama)
- { /*Imprime el contenido de la trama, supone bien construida*/
-   short int *piEtherType;
-   int i, iLen;
-   piEtherType = (short int *)(psTrama + TRAMA_ETHER_TYPE);
-   iLen = (int)(htons(*piEtherType));
-   printf ("Destino:  ");
-   for (i=0; i<LEN_MAC; i++) 
-     printf ("%02x ", (unsigned char)psTrama[TRAMA_DESTINATION+i]);
-   printf ("\nFuente:   ");
-   for (i=0; i<LEN_MAC; i++) 
-     printf ("%02x ", (unsigned char)psTrama[TRAMA_SOURCE+i]);  
-   printf ("\nLongitud: %d\n", iLen);
-   printf ("Payload:\n");
-   for (i=0; i<iLen; i++)
-       printf ("%c", (char)psTrama[i+TRAMA_PAYLOAD]);
-   piEtherType = (short int *)(psTrama+i+TRAMA_PAYLOAD);
-   printf ("\nFCS:      %d\n\n", *piEtherType); 
- }
- 
- int iLaTramaEsParaMi (char *psTrama, struct ifreq *psirDatos)
- {
-   int i, iFlag;
-   for (i=0, iFlag=1; i<LEN_MAC; i++)
-     if (psirDatos->ifr_hwaddr.sa_data[i]!=psTrama[TRAMA_DESTINATION+i]) iFlag = 0;
-   return (iFlag);
- }
+void vConvierteMAC (char *psMac, char *psOrg) { /*En lugar de caracteres, se requiere el numero*/
+  int i, j, iAux, iAcu;
+  for (i=0, j=0, iAcu=0; i<12; i++) {
+    if ((psOrg[i]>47)&&(psOrg[i]<58))  iAux = psOrg[i] - 48;  /*0:9*/
+    if ((psOrg[i]>64)&&(psOrg[i]<71))  iAux = psOrg[i] - 55;  /*A:F*/
+    if ((psOrg[i]>96)&&(psOrg[i]<103)) iAux = psOrg[i] - 87;  /*a:f*/ 
+    if ((i%2)==0) iAcu = iAux * 16;
+    else { /*Obtiene el byte*/
+      psMac[j] = iAcu + iAux;  j++;
+    }
+  }
+}
+
+/*Imprime el contenido de la trama, supone bien construida*/
+void vImprimeTrama (char *psTrama) {
+  short int *piEtherType;
+  int i, iLen;
+  piEtherType = (short int *)(psTrama + TRAMA_ETHER_TYPE);
+  iLen = (int)(htons(*piEtherType));
+  printf ("Destino:  ");
+  for (i=0; i<LEN_MAC; i++) 
+    printf ("%02x ", (unsigned char)psTrama[TRAMA_DESTINATION+i]);
+  printf ("\nFuente:   ");
+  for (i=0; i<LEN_MAC; i++) 
+    printf ("%02x ", (unsigned char)psTrama[TRAMA_SOURCE+i]);  
+  printf ("\nLongitud: %d\n", iLen);
+  printf ("Payload:\n");
+  for (i=0; i<iLen; i++)
+    printf ("%c", (char)psTrama[i+TRAMA_PAYLOAD]);
+  piEtherType = (short int *)(psTrama+i+TRAMA_PAYLOAD);
+  printf ("\nFCS:      %d\n\n", *piEtherType); 
+}
+
+int iLaTramaEsParaMi (char *psTrama, struct ifreq *psirDatos) {
+  int i, iFlag;
+  for (i=0, iFlag=1; i<LEN_MAC; i++)
+    if (psirDatos->ifr_hwaddr.sa_data[i]!=psTrama[TRAMA_DESTINATION+i]) iFlag = 0;
+  return (iFlag);
+}

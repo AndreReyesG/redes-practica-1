@@ -13,11 +13,10 @@ int main(int argc, char *argv[]) {
   struct sockaddr_ll socket_address; 
   /*Mensaje a enviar*/
   char scMsj[] = "En este arreglo de tipo char se coloca el mensaje que se enviara al "
-                 "host deseado. La longitud maxima del mensaje es de 256 bytes dado "
-                 "en ETHER_TYPE (eth.h); es posible cambiar la longitud o hacer que "
-                 "sea variable, para esto ultimo tener cuidado.";
-  if (argc!=3)
-  {
+    "host deseado. La longitud maxima del mensaje es de 256 bytes dado "
+    "en ETHER_TYPE (eth.h); es posible cambiar la longitud o hacer que "
+    "sea variable, para esto ultimo tener cuidado.";
+  if (argc!=3) {
     printf ("Error en argumentos.\n\n");
     printf ("seth INTERFACE MAC-DESTINO (Formato XXXXXXXXXXXX sin :).\n");
     printf ("Ejemplo: send_eth eth0 aabbccddeeff\n\n");
@@ -27,24 +26,24 @@ int main(int argc, char *argv[]) {
   /*contiene la MAC destino, la MAC origen ya se conoce.                  */ 
   /*Abre el socket. Para que sirven los parametros empleados?*/
   if ((sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1) perror("socket");
-  
+
   /* Mediante el nombre de la interface (i.e. eth0), se obtiene su indice */
   memset (&sirDatos, 0, sizeof(struct ifreq)); 
   for (i=0; argv[1][i]; i++) sirDatos.ifr_name[i] = argv[1][i];
   if (ioctl(sockfd, SIOCGIFINDEX, &sirDatos) < 0) perror("SIOCGIFINDEX");
   iIndex = sirDatos.ifr_ifindex;
-  
+
   /*Ahora obtenemos la MAC de la interface por donde saldran los datos */
   memset(&sirDatos, 0, sizeof(struct ifreq));
   for (i=0; argv[1][i]; i++) sirDatos.ifr_name[i] = argv[1][i];
   if (ioctl(sockfd, SIOCGIFHWADDR, &sirDatos) < 0) perror("SIOCGIFHWADDR");
-  
+
   /*Se imprime la MAC del host*/
   printf ("Iterface de salida: %u, con MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", 
-          (byte)(iIndex), 
-          (byte)(sirDatos.ifr_hwaddr.sa_data[0]), (byte)(sirDatos.ifr_hwaddr.sa_data[1]), 
-          (byte)(sirDatos.ifr_hwaddr.sa_data[2]), (byte)(sirDatos.ifr_hwaddr.sa_data[3]), 
-          (byte)(sirDatos.ifr_hwaddr.sa_data[4]), (byte)(sirDatos.ifr_hwaddr.sa_data[5]));
+      (byte)(iIndex), 
+      (byte)(sirDatos.ifr_hwaddr.sa_data[0]), (byte)(sirDatos.ifr_hwaddr.sa_data[1]), 
+      (byte)(sirDatos.ifr_hwaddr.sa_data[2]), (byte)(sirDatos.ifr_hwaddr.sa_data[3]), 
+      (byte)(sirDatos.ifr_hwaddr.sa_data[4]), (byte)(sirDatos.ifr_hwaddr.sa_data[5]));
 
   /*Ahora se construye la trama Ethernet empezando por su encabezado. El   */
   /*formato, para la trama IEEE 802.3 version 2, es:                       */ 
@@ -73,17 +72,14 @@ int main(int argc, char *argv[]) {
   /*Antes de colocar la longitud de la trama o ETHER_TYPE, colocamos*/
   /*el payload que basicamente es rellenar de letras el mensaje*/
   iLenHeader = sizeof(struct ether_header);
-  if (strlen(scMsj)>ETHER_TYPE)
-  {
+  if (strlen(scMsj)>ETHER_TYPE) {
     printf ("El mensaje debe ser mas corto o incremente ETHER_TYPE\n");
     close (sockfd);
     exit (1);
   }
   for (i=0; ((scMsj[i])&&(i<ETHER_TYPE)); i++) sbBufferEther[iLenHeader+i] = scMsj[i];
-  if (i<ETHER_TYPE)
-  { /*Rellenamos con espacios en blanco*/
-    while (i<ETHER_TYPE)
-    {
+  if (i<ETHER_TYPE) { /*Rellenamos con espacios en blanco*/
+    while (i<ETHER_TYPE) {
       sbBufferEther[iLenHeader+i] = ' ';  i++;
     }
   }
