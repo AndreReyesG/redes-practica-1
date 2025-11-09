@@ -1,56 +1,117 @@
-/*Escucha todos los paquetes ethernet que llegan, pero se*/
-/*desea el que le corresponde*/
+/* Escucha todos los paquetes ethernet que llegan y responde a consultas por nombre (mini-ARP) */
 #include "eth.h"
+
+/* Dirección broadcast */
+const byte BROADCAST_MAC[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
+/* Función auxiliar: compara si una trama es broadcast */
+int esBroadcast(char *psTrama) {
+  for (int i = 0; i < LEN_MAC; i++)
+    if ((unsigned char)psTrama[TRAMA_DESTINATION + i] != 0xff)
+      return 0;
+  return 1;
+}
+
+/* Envia una trama de respuesta con la MAC del host local */
+void enviarRespuesta(int sockfd, struct ifreq *psirDatos, char *psTramaRecibida) {
+  byte sbTrama[BUF_SIZ];
+  struct ether_header *ehResp = (struct ether_header *)sbTrama;
+  struct sockaddr_ll sa;
+
+  /* MAC destino = origen de la trama recibida */
+  for (int i = 0; i < 6; i++)
+    ehResp->ether_dhost[i] = (unsigned char)psTramaRecibida[TRAMA_SOURCE + i];
+
+  /* MAC origen = la de este host */
+  for (int i = 0; i < 6; i++)
+    ehResp->ether_shost[i] = (unsigned char)psirDatos->ifr_hwaddr.sa_data[i];
+
+  ehResp->ether_type = htons(ETHER_TYPE);
+
+  /* Payload: R + dirección MAC en formato texto */
+  char payload[64];
+  sprintf(payload, "R%02x:%02x:%02x:%02x:%02x:%02x",
+          (byte)psirDatos->ifr_hwaddr.sa_data[0], (byte)psirDatos->ifr_hwaddr.sa_data[1],
+          (byte)psirDatos->ifr_hwaddr.sa_data[2], (byte)psirDatos->ifr_hwaddr.sa_data[3],
+          (byte)psirDatos->ifr_hwaddr.sa_data[4], (byte)psirDatos->ifr_hwaddr.sa_data[5]);
+
+  strcpy((char *)(sbTrama + TRAMA_PAYLOAD), payload);
+
+  /* Enviar la trama */
+  memset(&sa, 0, sizeof(sa));
+  sa.sll_family = AF_PACKET;
+  sa.sll_protocol = htons(ETHER_TYPE);
+  sa.sll_ifindex = if_nametoindex(psirDatos->ifr_name);
+  sa.sll_halen = ETH_ALEN;
+  for (int i = 0; i < 6; i++)
+    sa.sll_addr[i] = ehResp->ether_dhost[i];
+
+  sendto(sockfd, sbTrama, TRAMA_PAYLOAD + strlen(payload) + 4, 0,
+         (struct sockaddr *)&sa, sizeof(sa));
+
+  printf("→ Respondiendo consulta ARP con mi MAC.\n");
+}
 
 int main(int argc, char *argv[]) {
   int sockfd, i, iTramaLen;
-  ssize_t numbytes;
   byte sbBufferEther[BUF_SIZ];
-  /*La cabecera Ethernet (eh) y sbBufferEther apuntan a lo mismo*/
-  struct ether_header *eh = (struct ether_header *)sbBufferEther;
-  int saddr_size; 
-  struct sockaddr saddr;    
+  struct sockaddr saddr;
   struct ifreq sirDatos;
-  int iEtherType;
+  int saddr_size;
+  char nombreLocal[64];
 
-  if (argc!=2) {
-    printf ("Error en argumentos.\n\n");
-    printf ("ethdump INTERFACE\n");
-    printf ("Ejemplo: recv_eth eth0\n\n");
-    exit (1);
+  if (argc != 2) {
+    printf("Error en argumentos.\n\n");
+    printf("Uso: recv_eth INTERFACE\n");
+    printf("Ejemplo: recv_eth eth0\n\n");
+    exit(1);
   }
-  /*Apartir de este este punto, argv[1] = Nombre de la interfaz.          */
 
-  /*Podriamos recibir tramas de nuestro "protocolo" o de cualquier protocolo*/
-  /*sin embargo, evitaremos esto y recibiremos de todo. Hay que tener cuidado*/
-  /*if ((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETHER_TYPE))) == -1)*/
-  /*Se abre el socket para "escuchar" todo sin pasar por al CAR*/
+  /* Obtener nombre del host */
+  gethostname(nombreLocal, sizeof(nombreLocal));
+  printf("Nombre local: %s\n", nombreLocal);
+
+  /* Abrir socket raw */
   if ((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1) {
-    perror("Listener: socket"); 
+    perror("Listener: socket");
     return -1;
   }
 
-  /*Ahora obtenemos la MAC de la interface del host*/
+  /* Obtener la MAC local */
   memset(&sirDatos, 0, sizeof(struct ifreq));
-  for (i=0; argv[1][i]; i++) sirDatos.ifr_name[i] = argv[1][i];
-  if (ioctl(sockfd, SIOCGIFHWADDR, &sirDatos) < 0) perror("SIOCGIFHWADDR");
+  strncpy(sirDatos.ifr_name, argv[1], IFNAMSIZ - 1);
+  if (ioctl(sockfd, SIOCGIFHWADDR, &sirDatos) < 0)
+    perror("SIOCGIFHWADDR");
 
-  /*Se imprime la MAC del host*/
-  printf ("Direccion MAC de la interfaz de entrada: %02x:%02x:%02x:%02x:%02x:%02x\n",
-      (byte)(sirDatos.ifr_hwaddr.sa_data[0]), (byte)(sirDatos.ifr_hwaddr.sa_data[1]),
-      (byte)(sirDatos.ifr_hwaddr.sa_data[2]), (byte)(sirDatos.ifr_hwaddr.sa_data[3]),
-      (byte)(sirDatos.ifr_hwaddr.sa_data[4]), (byte)(sirDatos.ifr_hwaddr.sa_data[5])); 
+  printf("MAC local: %02x:%02x:%02x:%02x:%02x:%02x\n",
+         (byte)sirDatos.ifr_hwaddr.sa_data[0], (byte)sirDatos.ifr_hwaddr.sa_data[1],
+         (byte)sirDatos.ifr_hwaddr.sa_data[2], (byte)sirDatos.ifr_hwaddr.sa_data[3],
+         (byte)sirDatos.ifr_hwaddr.sa_data[4], (byte)sirDatos.ifr_hwaddr.sa_data[5]);
 
-  /*Se mantiene en escucha*/ 
-  do { /*Capturando todos los paquetes*/   
+  /* Escuchar tramas */
+  while (1) {
     saddr_size = sizeof saddr;
-    iTramaLen = recvfrom(sockfd, sbBufferEther, BUF_SIZ, 0, &saddr, (socklen_t *)(&saddr_size)); 
-    /*Recibe todo lo que llegue. Llegara el paquete a otras capas dentro del host?*/   
-    if (iLaTramaEsParaMi(sbBufferEther, &sirDatos)) {
-      printf ("\nContenido de la trama recibida:\n");    
-      vImprimeTrama (sbBufferEther);
+    iTramaLen = recvfrom(sockfd, sbBufferEther, BUF_SIZ, 0, &saddr,
+                         (socklen_t *)(&saddr_size));
+
+    if (iLaTramaEsParaMi(sbBufferEther, &sirDatos) || esBroadcast(sbBufferEther)) {
+      char *payload = (char *)(sbBufferEther + TRAMA_PAYLOAD);
+      char tipo = payload[0];
+
+      if (tipo == 'Q') {
+        printf("Consulta recibida: %s\n", payload + 1);
+        if (strcmp(payload + 1, nombreLocal) == 0)
+          enviarRespuesta(sockfd, &sirDatos, sbBufferEther);
+      } else if (tipo == 'R') {
+        printf("Respuesta recibida (MAC): %s\n", payload + 1);
+      } else if (tipo == 'D') {
+        printf("\nTrama normal recibida:\n");
+        vImprimeTrama(sbBufferEther);
+      }
     }
-  } while (1);
-  close(sockfd); 
-  return (0);
+  }
+
+  close(sockfd);
+  return 0;
 }
+

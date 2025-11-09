@@ -1,109 +1,151 @@
+/* Envia tramas Ethernet, con mecanismo de consulta por nombre (mini-ARP) */
 #include "eth.h"
+
+/* MAC broadcast */
+const byte BROADCAST_MAC[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
+/* Envía una trama tipo Q (consulta por nombre) */
+void enviarConsulta(int sockfd, struct ifreq *sirDatos, int iIndex, char *nombreBuscado) {
+  byte sbBufferEther[BUF_SIZ];
+  struct ether_header *hdr = (struct ether_header *)sbBufferEther;
+  struct sockaddr_ll sa;
+
+  memset(sbBufferEther, 0, BUF_SIZ);
+  /* MAC origen */
+  for (int i = 0; i < 6; i++)
+    hdr->ether_shost[i] = (unsigned char)sirDatos->ifr_hwaddr.sa_data[i];
+  /* MAC destino = broadcast */
+  for (int i = 0; i < 6; i++)
+    hdr->ether_dhost[i] = BROADCAST_MAC[i];
+  hdr->ether_type = htons(ETHER_TYPE);
+
+  /* Payload: 'Q' + nombre buscado */
+  char payload[64];
+  sprintf(payload, "Q%s", nombreBuscado);
+  strcpy((char *)(sbBufferEther + TRAMA_PAYLOAD), payload);
+
+  memset(&sa, 0, sizeof(sa));
+  sa.sll_family = AF_PACKET;
+  sa.sll_protocol = htons(ETHER_TYPE);
+  sa.sll_ifindex = iIndex;
+  sa.sll_halen = ETH_ALEN;
+  for (int i = 0; i < 6; i++)
+    sa.sll_addr[i] = BROADCAST_MAC[i];
+
+  sendto(sockfd, sbBufferEther, TRAMA_PAYLOAD + strlen(payload) + 4, 0,
+         (struct sockaddr *)&sa, sizeof(sa));
+
+  printf("→ Consulta enviada para host: %s\n", nombreBuscado);
+}
+
+/* Espera respuesta y obtiene MAC destino */
+int esperarRespuesta(int sockfd, char *macDest) {
+  byte sbBufferEther[BUF_SIZ];
+  struct sockaddr saddr;
+  int saddr_size = sizeof saddr;
+  int len;
+
+  printf("Esperando respuesta...\n");
+  while (1) {
+    len = recvfrom(sockfd, sbBufferEther, BUF_SIZ, 0, &saddr,
+                   (socklen_t *)(&saddr_size));
+    char *payload = (char *)(sbBufferEther + TRAMA_PAYLOAD);
+    if (payload[0] == 'R') {
+      strcpy(macDest, payload + 1);
+      printf("← Respuesta ARP recibida: %s\n", macDest);
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/* Convierte una MAC en texto ("aa:bb:cc...") a bytes */
+void parseMacFromString(byte *dest, char *src) {
+  unsigned int values[6];
+  sscanf(src, "%x:%x:%x:%x:%x:%x",
+         &values[0], &values[1], &values[2],
+         &values[3], &values[4], &values[5]);
+  for (int i = 0; i < 6; i++)
+    dest[i] = (byte)values[i];
+}
 
 int main(int argc, char *argv[]) {
   int sockfd;
-  /*Esta estructura permite solicitar datos a la interface*/
   struct ifreq sirDatos;
   int i, iLen, iLenHeader, iLenTotal, iIndex;
-  /*Buffer en donde estara almacenada la trama*/
   byte sbBufferEther[BUF_SIZ], sbMac[6];
-  /*Para facilitar, hay una estructura para la cabecera Ethernet*/
-  /*La cabecera Ethernet (psehHeaderEther) y sbBufferEther apuntan a lo mismo*/
   struct ether_header *psehHeaderEther = (struct ether_header *)sbBufferEther;
-  struct sockaddr_ll socket_address; 
-  /*Mensaje a enviar*/
-  char scMsj[] = "En este arreglo de tipo char se coloca el mensaje que se enviara al "
-    "host deseado. La longitud maxima del mensaje es de 256 bytes dado "
-    "en ETHER_TYPE (eth.h); es posible cambiar la longitud o hacer que "
-    "sea variable, para esto ultimo tener cuidado.";
-  if (argc!=3) {
-    printf ("Error en argumentos.\n\n");
-    printf ("seth INTERFACE MAC-DESTINO (Formato XXXXXXXXXXXX sin :).\n");
-    printf ("Ejemplo: send_eth eth0 aabbccddeeff\n\n");
-    exit (1);
-  }
-  /*Apartir de este este punto, argv[1] = Nombre de la interfaz y argv[2] */
-  /*contiene la MAC destino, la MAC origen ya se conoce.                  */ 
-  /*Abre el socket. Para que sirven los parametros empleados?*/
-  if ((sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1) perror("socket");
+  struct sockaddr_ll socket_address;
+  char macDestinoTexto[32];
 
-  /* Mediante el nombre de la interface (i.e. eth0), se obtiene su indice */
-  memset (&sirDatos, 0, sizeof(struct ifreq)); 
-  for (i=0; argv[1][i]; i++) sirDatos.ifr_name[i] = argv[1][i];
-  if (ioctl(sockfd, SIOCGIFINDEX, &sirDatos) < 0) perror("SIOCGIFINDEX");
+  if (argc != 3) {
+    printf("Error en argumentos.\n\n");
+    printf("Uso: send_eth INTERFACE NOMBRE_DESTINO\n");
+    printf("Ejemplo: send_eth eth0 pc3\n\n");
+    exit(1);
+  }
+
+  /* Abrir socket raw */
+  if ((sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1)
+    perror("socket");
+
+  /* Obtener índice e interfaz */
+  memset(&sirDatos, 0, sizeof(struct ifreq));
+  strncpy(sirDatos.ifr_name, argv[1], IFNAMSIZ - 1);
+  if (ioctl(sockfd, SIOCGIFINDEX, &sirDatos) < 0)
+    perror("SIOCGIFINDEX");
   iIndex = sirDatos.ifr_ifindex;
 
-  /*Ahora obtenemos la MAC de la interface por donde saldran los datos */
-  memset(&sirDatos, 0, sizeof(struct ifreq));
-  for (i=0; argv[1][i]; i++) sirDatos.ifr_name[i] = argv[1][i];
-  if (ioctl(sockfd, SIOCGIFHWADDR, &sirDatos) < 0) perror("SIOCGIFHWADDR");
+  /* Obtener MAC local */
+  if (ioctl(sockfd, SIOCGIFHWADDR, &sirDatos) < 0)
+    perror("SIOCGIFHWADDR");
 
-  /*Se imprime la MAC del host*/
-  printf ("Iterface de salida: %u, con MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", 
-      (byte)(iIndex), 
-      (byte)(sirDatos.ifr_hwaddr.sa_data[0]), (byte)(sirDatos.ifr_hwaddr.sa_data[1]), 
-      (byte)(sirDatos.ifr_hwaddr.sa_data[2]), (byte)(sirDatos.ifr_hwaddr.sa_data[3]), 
-      (byte)(sirDatos.ifr_hwaddr.sa_data[4]), (byte)(sirDatos.ifr_hwaddr.sa_data[5]));
+  printf("Interfaz %s (idx %d) con MAC %02x:%02x:%02x:%02x:%02x:%02x\n",
+         argv[1], iIndex,
+         (byte)sirDatos.ifr_hwaddr.sa_data[0], (byte)sirDatos.ifr_hwaddr.sa_data[1],
+         (byte)sirDatos.ifr_hwaddr.sa_data[2], (byte)sirDatos.ifr_hwaddr.sa_data[3],
+         (byte)sirDatos.ifr_hwaddr.sa_data[4], (byte)sirDatos.ifr_hwaddr.sa_data[5]);
 
-  /*Ahora se construye la trama Ethernet empezando por su encabezado. El   */
-  /*formato, para la trama IEEE 802.3 version 2, es:                       */ 
-  /*6         bytes de MAC Origen                                          */
-  /*6         bytes de MAC Destino                                         */
-  /*2         bytes para longitud de la trama o Ether_Type                 */ 
-  /*46 a 1500 bytes de payload                                             */
-  /*4         bytes Frame Check Sequence                                   */
-  /*Total sin contar bytes de sincronizacion, va de 64 a 1518 bytes.       */
-  memset(sbBufferEther, 0, BUF_SIZ);  /*Llenamos con 0 el buffer de datos (payload)*/
-  /*Direccion MAC Origen*/
-  psehHeaderEther->ether_shost[0] = ((uint8_t *)&sirDatos.ifr_hwaddr.sa_data)[0];
-  psehHeaderEther->ether_shost[1] = ((uint8_t *)&sirDatos.ifr_hwaddr.sa_data)[1];
-  psehHeaderEther->ether_shost[2] = ((uint8_t *)&sirDatos.ifr_hwaddr.sa_data)[2];
-  psehHeaderEther->ether_shost[3] = ((uint8_t *)&sirDatos.ifr_hwaddr.sa_data)[3];
-  psehHeaderEther->ether_shost[4] = ((uint8_t *)&sirDatos.ifr_hwaddr.sa_data)[4];
-  psehHeaderEther->ether_shost[5] = ((uint8_t *)&sirDatos.ifr_hwaddr.sa_data)[5];
-  /*Direccion MAC destino*/
-  vConvierteMAC (sbMac, argv[2]);
-  psehHeaderEther->ether_dhost[0] = sbMac[0];
-  psehHeaderEther->ether_dhost[1] = sbMac[1];
-  psehHeaderEther->ether_dhost[2] = sbMac[2];
-  psehHeaderEther->ether_dhost[3] = sbMac[3];
-  psehHeaderEther->ether_dhost[4] = sbMac[4];
-  psehHeaderEther->ether_dhost[5] = sbMac[5];
-  /*Antes de colocar la longitud de la trama o ETHER_TYPE, colocamos*/
-  /*el payload que basicamente es rellenar de letras el mensaje*/
+  /* 1️⃣ Enviar consulta por nombre */
+  enviarConsulta(sockfd, &sirDatos, iIndex, argv[2]);
+
+  /* 2️⃣ Esperar respuesta con MAC */
+  if (!esperarRespuesta(sockfd, macDestinoTexto)) {
+    printf("No se obtuvo respuesta.\n");
+    close(sockfd);
+    return 1;
+  }
+
+  /* 3️⃣ Construir y enviar la trama normal */
+  parseMacFromString(sbMac, macDestinoTexto);
+
+  memset(sbBufferEther, 0, BUF_SIZ);
+  for (i = 0; i < 6; i++)
+    psehHeaderEther->ether_shost[i] = ((uint8_t *)&sirDatos.ifr_hwaddr.sa_data)[i];
+  for (i = 0; i < 6; i++)
+    psehHeaderEther->ether_dhost[i] = sbMac[i];
+  psehHeaderEther->ether_type = htons(ETHER_TYPE);
+
+  char scMsj[] = "D¡Hola desde emisor con mini-ARP!";
+  strcpy((char *)(sbBufferEther + TRAMA_PAYLOAD), scMsj);
+
   iLenHeader = sizeof(struct ether_header);
-  if (strlen(scMsj)>ETHER_TYPE) {
-    printf ("El mensaje debe ser mas corto o incremente ETHER_TYPE\n");
-    close (sockfd);
-    exit (1);
-  }
-  for (i=0; ((scMsj[i])&&(i<ETHER_TYPE)); i++) sbBufferEther[iLenHeader+i] = scMsj[i];
-  if (i<ETHER_TYPE) { /*Rellenamos con espacios en blanco*/
-    while (i<ETHER_TYPE) {
-      sbBufferEther[iLenHeader+i] = ' ';  i++;
-    }
-  }
-  iLenHeader = iLenHeader + i;   
-  /*Tipo de protocolo o la longitud del paquete*/
-  psehHeaderEther->ether_type = htons(ETHER_TYPE); 
-  /*Finalmente FCS*/
-  for (i=0; i<4; i++) sbBufferEther[iLenHeader+i] = 0;
-  iLenTotal = iLenHeader + 4; /*Longitud total*/
+  iLenTotal = iLenHeader + strlen(scMsj) + 4;
 
-  /*Procedemos al envio de la trama*/
+  memset(&socket_address, 0, sizeof(socket_address));
+  socket_address.sll_family = AF_PACKET;
+  socket_address.sll_protocol = htons(ETHER_TYPE);
   socket_address.sll_ifindex = iIndex;
   socket_address.sll_halen = ETH_ALEN;
-  socket_address.sll_addr[0] = sbMac[0];
-  socket_address.sll_addr[1] = sbMac[1];
-  socket_address.sll_addr[2] = sbMac[2];
-  socket_address.sll_addr[3] = sbMac[3];
-  socket_address.sll_addr[4] = sbMac[4];
-  socket_address.sll_addr[5] = sbMac[5];
-  iLen = sendto(sockfd, sbBufferEther, iLenTotal, 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll));
-  if (iLen<0) printf("Send failed\n");
-  printf ("\nContenido de la trama enviada:\n\n");
-  vImprimeTrama (sbBufferEther);
-  /*Cerramos*/
-  close (sockfd);
+  for (i = 0; i < 6; i++)
+    socket_address.sll_addr[i] = sbMac[i];
+
+  sendto(sockfd, sbBufferEther, iLenTotal, 0,
+         (struct sockaddr *)&socket_address, sizeof(struct sockaddr_ll));
+
+  printf("→ Mensaje enviado a %s (%s)\n", argv[2], macDestinoTexto);
+
+  close(sockfd);
   return 0;
 }
+
