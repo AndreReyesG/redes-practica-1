@@ -98,15 +98,20 @@ int main(int argc, char *argv[]) {
       char *payload = (char *)(sbBufferEther + TRAMA_PAYLOAD);
       char tipo = payload[0];
 
-      if (tipo == 'Q') {
-        printf("Consulta recibida: %s\n", payload + 1);
-        if (strcmp(payload + 1, nombreLocal) == 0)
-          enviarRespuesta(sockfd, &sirDatos, sbBufferEther);
-      } else if (tipo == 'R') {
-        printf("Respuesta recibida (MAC): %s\n", payload + 1);
-      } else if (tipo == 'D') {
-        printf("\nTrama normal recibida:\n");
-        vImprimeTrama(sbBufferEther);
+      switch (tipo) {
+        case 'Q':
+          printf("Consulta recibida: %s\n", payload + 1);
+            if (strcmp(payload + 1, nombreLocal) == 0) {
+              enviarRespuesta(sockfd, &sirDatos, sbBufferEther);
+            }
+            break;
+        case 'R':
+            printf("Respuesta recibida (MAC): %s\n", payload + 1);
+            break;
+        case 'D':
+            printf("\nTrama normal recibida:\n");
+            vImprimeTrama(sbBufferEther);
+            break;
       }
     }
   }
