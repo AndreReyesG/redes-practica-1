@@ -59,7 +59,7 @@ int esperarRespuesta(int sockfd, char *macDest) {
   return 0;
 }
 
-/* Convierte una MAC en texto ("aa:bb:cc...") a bytes */
+/*Convierte una MAC en texto ("aa:bb:cc...") a bytes*/
 void parseMacFromString(byte *dest, char *src) {
   unsigned int values[6];
   sscanf(src, "%x:%x:%x:%x:%x:%x",
@@ -85,18 +85,18 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
-  /* Abrir socket raw */
+  /*Abrir socket raw*/
   if ((sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1)
     perror("socket");
 
-  /* Obtener índice e interfaz */
+  /*Obtener índice e interfaz*/
   memset(&sirDatos, 0, sizeof(struct ifreq));
   strncpy(sirDatos.ifr_name, argv[1], IFNAMSIZ - 1);
   if (ioctl(sockfd, SIOCGIFINDEX, &sirDatos) < 0)
     perror("SIOCGIFINDEX");
   iIndex = sirDatos.ifr_ifindex;
 
-  /* Obtener MAC local */
+  /*Obtener MAC local*/
   if (ioctl(sockfd, SIOCGIFHWADDR, &sirDatos) < 0)
     perror("SIOCGIFHWADDR");
 
@@ -106,17 +106,18 @@ int main(int argc, char *argv[]) {
          (byte)sirDatos.ifr_hwaddr.sa_data[2], (byte)sirDatos.ifr_hwaddr.sa_data[3],
          (byte)sirDatos.ifr_hwaddr.sa_data[4], (byte)sirDatos.ifr_hwaddr.sa_data[5]);
 
-  /* 1️⃣ Enviar consulta por nombre */
+
+  /*Enviar consulta por nombre */
   enviarConsulta(sockfd, &sirDatos, iIndex, argv[2]);
 
-  /* 2️⃣ Esperar respuesta con MAC */
+  /*Esperar respuesta con MAC */
   if (!esperarRespuesta(sockfd, macDestinoTexto)) {
     printf("No se obtuvo respuesta.\n");
     close(sockfd);
     return 1;
   }
 
-  /* 3️⃣ Construir y enviar la trama normal */
+  /*Construir y enviar la trama normal */
   parseMacFromString(sbMac, macDestinoTexto);
 
   /*Llenamos con 0 el buffer de datos (payload)*/
