@@ -119,19 +119,46 @@ int main(int argc, char *argv[]) {
   /* 3️⃣ Construir y enviar la trama normal */
   parseMacFromString(sbMac, macDestinoTexto);
 
+  /*Llenamos con 0 el buffer de datos (payload)*/
   memset(sbBufferEther, 0, BUF_SIZ);
+  /*Dirección MAC Origen*/
   for (i = 0; i < 6; i++)
     psehHeaderEther->ether_shost[i] = ((uint8_t *)&sirDatos.ifr_hwaddr.sa_data)[i];
+  /*Dirección MAC destino*/
   for (i = 0; i < 6; i++)
     psehHeaderEther->ether_dhost[i] = sbMac[i];
-  psehHeaderEther->ether_type = htons(ETHER_TYPE);
 
   char scMsj[] = "D¡Hola desde emisor con mini-ARP!";
   strcpy((char *)(sbBufferEther + TRAMA_PAYLOAD), scMsj);
 
   iLenHeader = sizeof(struct ether_header);
-  iLenTotal = iLenHeader + strlen(scMsj) + 4;
+  if (strlen(scMsj) > ETHER_TYPE) {
+    printf("El mensaje debe ser mas corto o incremente ETHER_TYPE\n");
+    close(sockfd);
+    exit(1);
+  }
+  for (i = 0; (scMsj[i] && (i < ETHER_TYPE)); i++) {
+    sbBufferEther[iLenHeader + i] = scMsj[i];
+  }
+  /* Rellenamos con espacios en blanco */
+  if (i < ETHER_TYPE) {
+    while (i < ETHER_TYPE) {
+      sbBufferEther[iLenHeader + i] = ' ';
+      i++;
+    }
+  }
+  iLenHeader = iLenHeader + i;
 
+  /*Tipo de protocolo o la longitud del paquete*/
+  psehHeaderEther->ether_type = htons(ETHER_TYPE);
+  /*Finalmente FCS*/
+  for (i = 0; i < 4; i++) {
+    sbBufferEther[iLenHeader + i] = 0;
+  }
+  /*Longitud total*/
+  iLenTotal = iLenHeader + 4;
+
+  /*Procedemos al envio de la trama*/
   memset(&socket_address, 0, sizeof(socket_address));
   socket_address.sll_family = AF_PACKET;
   socket_address.sll_protocol = htons(ETHER_TYPE);
